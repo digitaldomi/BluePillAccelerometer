@@ -44,8 +44,11 @@
 RTC_HandleTypeDef hrtc;
 
 SPI_HandleTypeDef hspi1;
+SPI_HandleTypeDef hspi2;
 
 /* USER CODE BEGIN PV */
+
+
 
 /* USER CODE END PV */
 
@@ -53,13 +56,36 @@ SPI_HandleTypeDef hspi1;
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_RTC_Init(void);
+static void MX_SPI2_Init(void);
 static void MX_SPI1_Init(void);
 /* USER CODE BEGIN PFP */
+
+uint8_t answerFromSPI[10];
 
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+void setBoardLED(int state){
+	HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, !state);
+}
+int getBoardLED(){
+	return HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_13);
+}
+
+void HAL_SPI_RxCpltCallback(SPI_HandleTypeDef *hspi){
+
+//	if(hspi->Instance == &hspi2.Instance){ //TODO FIXME not working
+		  if(*answerFromSPI+2 == 0xAD){ //default device ID
+			  setBoardLED(1);
+		  }else{
+			  setBoardLED(0);
+		  }
+//	}
+
+
+}
 
 long tss(int data){
 	static int counter = 0;
@@ -71,7 +97,6 @@ long tss(int data){
 	for(int i = 0; i < 50-1; i++){
 		squared_sum += ringbuffer[i]*ringbuffer[i];
 	}
-
 	return squared_sum;
 }
 
@@ -107,6 +132,7 @@ int main(void)
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
   MX_RTC_Init();
+  MX_SPI2_Init();
   MX_SPI1_Init();
   /* USER CODE BEGIN 2 */
 
@@ -120,27 +146,68 @@ int main(void)
 
     /* USER CODE BEGIN 3 */
 
-	  //HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
-	  //HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, !HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_13));
-	  //HAL_Delay(10);
 
-	  //int data[10] = {0,1,2,3,4,5,6,7,8,9};
-	  //HAL_SPI_Transmit(&hspi1, &data, 10, 100);
-	  uint32_t seed;
-	  seed = seed + 271828192;
-	  seed = seed * 314159;
-	  uint16_t data = seed & 0x0FFF; //12 bits
+	/*
+	uint32_t seed;
+	seed = seed + 271828192;
+	seed = seed * 314159;
+	uint16_t data = seed & 0x0FFF; //12 bits
 
-	  long sum = tss(data);
-	  if(sum >  250000000){ //12bit = 4096
-		  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, 0);
-	  }else{
-		  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, 1);
-	  }
+	long sum = tss(data);
+	if(sum >  250000000){ //12bit = 4096
+	  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, 0);
+	}else{
+	  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, 1);
+	}*/
+
+	HAL_SPI_Transmit(&hspi2, (uint8_t *)0x0A, 1, 100);
+	HAL_SPI_Transmit(&hspi2, (uint8_t *)0x20, 1, 100);
+	HAL_SPI_Transmit(&hspi2, (uint8_t *)0xFA, 1, 100);
+
+	HAL_SPI_Transmit(&hspi2, (uint8_t *)0x0A, 1, 100);
+	HAL_SPI_Transmit(&hspi2, (uint8_t *)0x21, 1, 100);
+	HAL_SPI_Transmit(&hspi2, (uint8_t *)0x00, 1, 100);
+
+	HAL_SPI_Transmit(&hspi2, (uint8_t *)0x0A, 1, 100);
+	HAL_SPI_Transmit(&hspi2, (uint8_t *)0x25, 1, 100);
+	HAL_SPI_Transmit(&hspi2, (uint8_t *)0x1E, 1, 100);
+
+	HAL_SPI_Transmit(&hspi2, (uint8_t *)0x0A, 1, 100);
+	HAL_SPI_Transmit(&hspi2, (uint8_t *)0x27, 1, 100);
+	HAL_SPI_Transmit(&hspi2, (uint8_t *)0x3F, 1, 100);
+
+	HAL_SPI_Transmit(&hspi2, (uint8_t *)0x0A, 1, 100);
+	HAL_SPI_Transmit(&hspi2, (uint8_t *)0x2B, 1, 100);
+	HAL_SPI_Transmit(&hspi2, (uint8_t *)0x40, 1, 100);
+
+	HAL_SPI_Transmit(&hspi2, (uint8_t *)0x0A, 1, 100);
+	HAL_SPI_Transmit(&hspi2, (uint8_t *)0x2D, 1, 100);
+	HAL_SPI_Transmit(&hspi2, (uint8_t *)0x0A, 1, 100);
 
 
+	while(1){
+
+		uint8_t data[3];
+		data[0] = 0x0B; //read command
+		data[1] = 0x00; //read device id
+		data[2] = 0x00; //dummy, keep clock running
+
+		//HAL_SPI_Transmit(&hspi1, data, 2, 100);
+
+		//HAL_SPI_Receive_IT(&hspi1, answerFromSPI, 1);
 
 
+		HAL_SPI_Receive_IT(&hspi2, answerFromSPI, 3);
+
+		HAL_SPI_Transmit(&hspi2, data, 3, 100);
+
+
+		//uint8_t result;
+		//HAL_SPI_Receive(&hspi2, &result, 1, 100);
+
+		HAL_Delay(20);
+
+	}
   }
   /* USER CODE END 3 */
 }
@@ -266,7 +333,7 @@ static void MX_SPI1_Init(void)
   hspi1.Init.DataSize = SPI_DATASIZE_8BIT;
   hspi1.Init.CLKPolarity = SPI_POLARITY_LOW;
   hspi1.Init.CLKPhase = SPI_PHASE_1EDGE;
-  hspi1.Init.NSS = SPI_NSS_SOFT;
+  hspi1.Init.NSS = SPI_NSS_HARD_OUTPUT;
   hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_2;
   hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
   hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
@@ -283,6 +350,44 @@ static void MX_SPI1_Init(void)
 }
 
 /**
+  * @brief SPI2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_SPI2_Init(void)
+{
+
+  /* USER CODE BEGIN SPI2_Init 0 */
+
+  /* USER CODE END SPI2_Init 0 */
+
+  /* USER CODE BEGIN SPI2_Init 1 */
+
+  /* USER CODE END SPI2_Init 1 */
+  /* SPI2 parameter configuration*/
+  hspi2.Instance = SPI2;
+  hspi2.Init.Mode = SPI_MODE_MASTER;
+  hspi2.Init.Direction = SPI_DIRECTION_2LINES;
+  hspi2.Init.DataSize = SPI_DATASIZE_8BIT;
+  hspi2.Init.CLKPolarity = SPI_POLARITY_LOW;
+  hspi2.Init.CLKPhase = SPI_PHASE_1EDGE;
+  hspi2.Init.NSS = SPI_NSS_HARD_OUTPUT;
+  hspi2.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_2;
+  hspi2.Init.FirstBit = SPI_FIRSTBIT_MSB;
+  hspi2.Init.TIMode = SPI_TIMODE_DISABLE;
+  hspi2.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
+  hspi2.Init.CRCPolynomial = 10;
+  if (HAL_SPI_Init(&hspi2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN SPI2_Init 2 */
+
+  /* USER CODE END SPI2_Init 2 */
+
+}
+
+/**
   * @brief GPIO Initialization Function
   * @param None
   * @retval None
@@ -294,6 +399,7 @@ static void MX_GPIO_Init(void)
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
+  __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_SET);
