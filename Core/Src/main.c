@@ -45,8 +45,6 @@ RTC_HandleTypeDef hrtc;
 
 SPI_HandleTypeDef hspi2;
 
-TIM_HandleTypeDef htim4;
-
 /* USER CODE BEGIN PV */
 
 
@@ -58,7 +56,6 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_RTC_Init(void);
 static void MX_SPI2_Init(void);
-static void MX_TIM4_Init(void);
 /* USER CODE BEGIN PFP */
 
 uint8_t answerFromSPI[10];
@@ -77,10 +74,6 @@ int RTC_EVENT = 0;
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
-void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
-{
-    HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
-}
 
 void setBoardLED(int state){
 	HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, !state);
@@ -106,32 +99,37 @@ void HAL_RTC_AlarmAEventCallback(RTC_HandleTypeDef *hrtc){
 
 }
 
-void HAL_RTCEx_RTCEventCallback(RTC_HandleTypeDef *hrtc){
-	RTC_EVENT = 1;
-	if(RTC_EVENT){
-		RTC_EVENT = 2;
-		RTC_EVENT = 0;
-	}
-	RTC_EVENT = 0;
+void HAL_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi){
+
+
+	if(answerFromSPI[2]==0xAD){
+				setBoardLED(1);
+				HAL_Delay(100);
+			}else{
+				setBoardLED(0);
+			}
 
 }
-
-void HAL_RTCEx_RTCEventErrorCallback(RTC_HandleTypeDef *hrtc){
-
-}
-
-
 
 void HAL_SPI_RxCpltCallback(SPI_HandleTypeDef *hspi){
 
-//	if(hspi->Instance == &hspi2.Instance){ //TODO FIXME not working
-		  if(*answerFromSPI+2 == 0xAD){ //default device ID
-			  //setBoardLED(1);
-		  }else{
-			  //setBoardLED(0);
-		  }
-//	}
+	if(answerFromSPI[2]==0xAD){
+				setBoardLED(1);
+				HAL_Delay(100);
+			}else{
+				setBoardLED(0);
+			}
 
+}
+
+void HAL_SPI_RxHalfCpltCallback(SPI_HandleTypeDef *hspi){
+
+	if(answerFromSPI[2]==0xAD){
+				setBoardLED(1);
+				HAL_Delay(100);
+			}else{
+				setBoardLED(0);
+			}
 
 }
 
@@ -181,7 +179,6 @@ int main(void)
   MX_GPIO_Init();
   MX_RTC_Init();
   MX_SPI2_Init();
-  MX_TIM4_Init();
   /* USER CODE BEGIN 2 */
 
   /* USER CODE END 2 */
@@ -244,8 +241,28 @@ int main(void)
 		HAL_Delay(250);
 	}
 
-	//HAL_PWR_EnterSTOPMode(PWR_LOWPOWERREGULATOR_ON, PWR_STOPENTRY_WFI);
+	uint8_t id_read[3] = {0x0B, 0x00, 0x00}; //write, reg 0, dummy
 
+	HAL_SPI_Receive_IT(&hspi2, answerFromSPI, 3);
+
+	HAL_SPI_Transmit_IT(&hspi2, id_read, 3);
+
+
+	//Test SPI
+	while(1){
+
+
+
+
+		HAL_Delay(10);
+
+
+
+
+
+	}
+
+	//Test Stop Mode
 	while(1){
 
 		if(RTC_EVENT){
@@ -254,10 +271,8 @@ int main(void)
 			HAL_Delay(1);
 			setBoardLED(0);
 
-			//EXTI->PR = 0xFFFFFFFF;
-			//HAL_PWR_EnableSEVOnPend();
-			//__HAL_RTC_ALARM_EXTI_CLEAR_FLAG();
-			HAL_PWR_EnterSTOPMode(PWR_LOWPOWERREGULATOR_ON, PWR_STOPENTRY_WFI);
+			//Put in stop mode
+			//HAL_PWR_EnterSTOPMode(PWR_LOWPOWERREGULATOR_ON, PWR_STOPENTRY_WFI);
 		}else{
 			setBoardLED(1);
 			HAL_Delay(1);
@@ -405,51 +420,6 @@ static void MX_SPI2_Init(void)
   /* USER CODE BEGIN SPI2_Init 2 */
 
   /* USER CODE END SPI2_Init 2 */
-
-}
-
-/**
-  * @brief TIM4 Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_TIM4_Init(void)
-{
-
-  /* USER CODE BEGIN TIM4_Init 0 */
-
-  /* USER CODE END TIM4_Init 0 */
-
-  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
-  TIM_MasterConfigTypeDef sMasterConfig = {0};
-
-  /* USER CODE BEGIN TIM4_Init 1 */
-
-  /* USER CODE END TIM4_Init 1 */
-  htim4.Instance = TIM4;
-  htim4.Init.Prescaler = 128;
-  htim4.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim4.Init.Period = 7800;
-  htim4.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
-  htim4.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
-  if (HAL_TIM_Base_Init(&htim4) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
-  if (HAL_TIM_ConfigClockSource(&htim4, &sClockSourceConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
-  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
-  if (HAL_TIMEx_MasterConfigSynchronization(&htim4, &sMasterConfig) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN TIM4_Init 2 */
-
-  /* USER CODE END TIM4_Init 2 */
 
 }
 
