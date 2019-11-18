@@ -55,6 +55,12 @@ void Error_Handler(void);
 
 /* USER CODE BEGIN EFP */
 
+void tim4int();
+void setBoardLED(int state);
+int getBoardLED();
+
+
+
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
