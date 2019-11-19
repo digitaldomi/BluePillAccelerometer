@@ -33,6 +33,10 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+
+#define USING_STOPMODE 0
+
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -99,37 +103,20 @@ void HAL_RTC_AlarmAEventCallback(RTC_HandleTypeDef *hrtc){
 
 }
 
+
 void HAL_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi){
-
-
-	if(answerFromSPI[2]==0xAD){
-				setBoardLED(1);
-				HAL_Delay(100);
-			}else{
-				setBoardLED(0);
-			}
-
+	HAL_GPIO_WritePin(SPI2_CS_GPIO_Port, SPI2_CS_Pin, 1); //Chip select high -> acc deselected
 }
 
 void HAL_SPI_RxCpltCallback(SPI_HandleTypeDef *hspi){
-
-	if(answerFromSPI[2]==0xAD){
-				setBoardLED(1);
-				HAL_Delay(100);
-			}else{
-				setBoardLED(0);
-			}
 
 }
 
 void HAL_SPI_RxHalfCpltCallback(SPI_HandleTypeDef *hspi){
 
-	if(answerFromSPI[2]==0xAD){
-				setBoardLED(1);
-				HAL_Delay(100);
-			}else{
-				setBoardLED(0);
-			}
+}
+
+void acc_cmd(uint8_t* data, uint8_t length){
 
 }
 
@@ -217,6 +204,9 @@ int main(void)
 	HAL_SPI_Transmit(&hspi2, (uint8_t *)0x0A, 1, 100);
 */
 
+	HAL_GPIO_WritePin(SPI2_CS_GPIO_Port, SPI2_CS_Pin,1); //Accelerometer !CS high to disable
+	hspi2.Init.NSS = SPI_NSS_SOFT;
+
 	HAL_DBGMCU_EnableDBGStopMode();
 
 	setBoardLED(0);
@@ -232,14 +222,16 @@ int main(void)
 
 	myAlarm.AlarmTime = myTime;
 
-	HAL_RTC_SetAlarm_IT(&hrtc, &myAlarm, RTC_FORMAT_BIN);
+	//HAL_RTC_SetAlarm_IT(&hrtc, &myAlarm, RTC_FORMAT_BIN);
 
+	#if USING_STOPMODE == 1
 	for(int i = 0; i < 15; i++){ //7.5s to connect to debugger
 		setBoardLED(1);
 		HAL_Delay(250);
 		setBoardLED(0);
 		HAL_Delay(250);
 	}
+	#endif
 
 	uint8_t id_read[3] = {0x0B, 0x00, 0x00}; //write, reg 0, dummy
 
@@ -247,20 +239,25 @@ int main(void)
 
 	HAL_SPI_Transmit_IT(&hspi2, id_read, 3);
 
-
 	//Test SPI
 	while(1){
 
 
+		//HAL_SPI_TransmitReceive(&hspi2, id_read, answerFromSPI, 3, 100);
+		HAL_GPIO_WritePin(SPI2_CS_GPIO_Port, SPI2_CS_Pin, 0);
+		HAL_SPI_TransmitReceive_IT(&hspi2, id_read, answerFromSPI, 3);
 
 
 		HAL_Delay(10);
+		//HAL_SPI_Transmit_IT(&hspi2, id_read, 3);
 
-
-
-
-
+		if(answerFromSPI[2] == 0xAD){
+			setBoardLED(1);
+		}else{
+			HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
+		}
 	}
+
 
 	//Test Stop Mode
 	while(1){
@@ -272,7 +269,10 @@ int main(void)
 			setBoardLED(0);
 
 			//Put in stop mode
-			//HAL_PWR_EnterSTOPMode(PWR_LOWPOWERREGULATOR_ON, PWR_STOPENTRY_WFI);
+		#if USING_STOPMODE == 1
+			HAL_PWR_EnterSTOPMode(PWR_LOWPOWERREGULATOR_ON, PWR_STOPENTRY_WFI);
+		#endif
+
 		}else{
 			setBoardLED(1);
 			HAL_Delay(1);
@@ -312,7 +312,7 @@ void SystemClock_Config(void)
   RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
                               |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
   RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_HSI;
-  RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV4;
+  RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
   RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
 
@@ -407,7 +407,7 @@ static void MX_SPI2_Init(void)
   hspi2.Init.DataSize = SPI_DATASIZE_8BIT;
   hspi2.Init.CLKPolarity = SPI_POLARITY_LOW;
   hspi2.Init.CLKPhase = SPI_PHASE_1EDGE;
-  hspi2.Init.NSS = SPI_NSS_HARD_OUTPUT;
+  hspi2.Init.NSS = SPI_NSS_SOFT;
   hspi2.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_2;
   hspi2.Init.FirstBit = SPI_FIRSTBIT_MSB;
   hspi2.Init.TIMode = SPI_TIMODE_DISABLE;
@@ -440,12 +440,22 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(LED_GPIO_Port, LED_Pin, GPIO_PIN_SET);
 
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(SPI2_CS_GPIO_Port, SPI2_CS_Pin, GPIO_PIN_RESET);
+
   /*Configure GPIO pin : LED_Pin */
   GPIO_InitStruct.Pin = LED_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(LED_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : SPI2_CS_Pin */
+  GPIO_InitStruct.Pin = SPI2_CS_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(SPI2_CS_GPIO_Port, &GPIO_InitStruct);
 
 }
 
