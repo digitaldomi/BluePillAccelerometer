@@ -36,6 +36,45 @@
 
 #define USING_STOPMODE 0
 
+//AD COMMANDS
+#define READ 			0x0A
+#define WRITE			0x0B
+#define READ_FIFO		0x0D
+//AD REGISTERS
+#define DEVID_AD 		0x00
+#define DEVID_MST 		0x01
+#define PARTID			0x02
+#define REVID			0x03
+#define XDATA			0x08
+#define YDATA			0x09
+#define ZDATA			0x0A
+#define STATUS			0x0B
+#define FIFO_ENTRIES_L	0x0C
+#define FIFO_ENTRIES_H	0x0D
+#define XDATA_L			0x0E
+#define XDATA_H			0x0F
+#define YDATA_L			0x10
+#define YDATA_H			0x11
+#define ZDATA_L			0x12
+#define ZDATA_H			0x13
+#define TEMP_L			0x14
+#define TEMP_H			0x15
+#define SOFT_RESET		0x1F
+#define THRESH_ACT_L	0x20
+#define THRESH_ACT_H	0x21
+#define TIME_ACT		0x22
+#define THRESH_INACT_L	0x23
+#define THRESH_INACT_H	0x24
+#define TIME_INACT_L	0x25
+#define TIME_INACT_H	0x26
+#define ACT_INACT_CTL	0x27
+#define FIFO_CONTROL	0x28
+#define FIFO_SAMPLES	0x29
+#define INTMAP1			0x2A
+#define INTMAP2			0x2B
+#define FILTER_CTL		0x2C
+#define POWER_CTL		0x2D
+#define SELF_TEST		0x2E
 
 /* USER CODE END PD */
 
@@ -51,7 +90,18 @@ SPI_HandleTypeDef hspi2;
 
 /* USER CODE BEGIN PV */
 
+typedef struct AccelerometerStatus {
+	unsigned int ERR_USER_REGS :1;
+	unsigned int AWAKE :1;
+	unsigned int INACT :1;
+	unsigned int ACT :1;
+	unsigned int FIFO_OVERRUN :1;
+	unsigned int FIFO_WATERMARK :1;
+	unsigned int FIFO_READY :1;
+	unsigned int DATA_READY :1;
+} Acc_Status;
 
+Acc_Status ADXL;
 
 /* USER CODE END PV */
 
@@ -78,6 +128,18 @@ int RTC_EVENT = 0;
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
+void parseAccStatus(uint8_t status_byte){
+	ADXL.ERR_USER_REGS = 	(status_byte >> 7) & 0x01;
+	ADXL.AWAKE = 			(status_byte >> 6) & 0x01;
+	ADXL.INACT = 			(status_byte >> 5) & 0x01;
+	ADXL.ACT = 				(status_byte >> 4) & 0x01;
+	ADXL.FIFO_OVERRUN = 	(status_byte >> 3) & 0x01;
+	ADXL.FIFO_WATERMARK = 	(status_byte >> 2) & 0x01;
+	ADXL.FIFO_READY = 		(status_byte >> 1) & 0x01;
+	ADXL.DATA_READY = 		(status_byte >> 0) & 0x01;
+}
+
+
 
 void setBoardLED(int state){
 	HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13, !state);
@@ -103,6 +165,12 @@ void HAL_RTC_AlarmAEventCallback(RTC_HandleTypeDef *hrtc){
 
 }
 
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
+	if(GPIO_Pin == 0){
+		//A0 acc interrupt activity detected
+		setBoardLED(1);
+	}
+}
 
 void HAL_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi){
 	HAL_GPIO_WritePin(SPI2_CS_GPIO_Port, SPI2_CS_Pin, 1); //Chip select high -> acc deselected
@@ -116,7 +184,58 @@ void HAL_SPI_RxHalfCpltCallback(SPI_HandleTypeDef *hspi){
 
 }
 
-void acc_cmd(uint8_t* data, uint8_t length){
+void initAcc(){
+#define length 30
+	uint8_t dummy_read[length];
+	uint8_t commands[length/3][3] = { //1. reg, 2. value, ...
+		WRITE,
+		THRESH_ACT_L, //activity threshold 250mg
+		0xFA, //one sample -> direct detection
+
+		WRITE,
+		THRESH_ACT_H,
+		0x00,
+
+		WRITE,
+		THRESH_INACT_L, //2 inact. threshold 150mg
+		0x96,
+
+		WRITE,
+		THRESH_INACT_H,
+		0x00,
+
+		WRITE,
+		TIME_INACT_L, // inact. timer 30sampl.
+		0x20,
+
+		WRITE,
+		TIME_ACT, // act. timer 0x20 sampl.
+		0x20,
+
+		WRITE,
+		ACT_INACT_CTL, //4 motion detect loop mode
+		0x3F,
+
+		WRITE,
+		INTMAP1, //INT1 pin
+		0x10, //Activity mapped to INT1 pin
+
+		WRITE,
+		FILTER_CTL, //
+		0x03, //100Hz, 2g measurement, no filtering, low power
+
+		WRITE,
+		POWER_CTL, //6 Begin measur. wakeup mode
+		0b00001010
+
+	};
+	for(int i = 0; i < length/3; i++){
+		HAL_GPIO_WritePin(SPI2_CS_GPIO_Port, SPI2_CS_Pin, 0);
+		uint8_t current_cmd[3] = {commands[i][0], commands[i][1], commands[i][2]};
+		HAL_SPI_TransmitReceive(&hspi2, current_cmd, dummy_read, 3, 10);
+		HAL_GPIO_WritePin(SPI2_CS_GPIO_Port, SPI2_CS_Pin, 1); //use if not using interrupts
+
+	}
 
 }
 
@@ -168,41 +287,6 @@ int main(void)
   MX_SPI2_Init();
   /* USER CODE BEGIN 2 */
 
-  /* USER CODE END 2 */
-
-  /* Infinite loop */
-  /* USER CODE BEGIN WHILE */
-  while (1)
-  {
-    /* USER CODE END WHILE */
-
-    /* USER CODE BEGIN 3 */
-
-/*
-	HAL_SPI_Transmit(&hspi2, (uint8_t *)0x0A, 1, 100);
-	HAL_SPI_Transmit(&hspi2, (uint8_t *)0x20, 1, 100);
-	HAL_SPI_Transmit(&hspi2, (uint8_t *)0xFA, 1, 100);
-
-	HAL_SPI_Transmit(&hspi2, (uint8_t *)0x0A, 1, 100);
-	HAL_SPI_Transmit(&hspi2, (uint8_t *)0x21, 1, 100);
-	HAL_SPI_Transmit(&hspi2, (uint8_t *)0x00, 1, 100);
-
-	HAL_SPI_Transmit(&hspi2, (uint8_t *)0x0A, 1, 100);
-	HAL_SPI_Transmit(&hspi2, (uint8_t *)0x25, 1, 100);
-	HAL_SPI_Transmit(&hspi2, (uint8_t *)0x1E, 1, 100);
-
-	HAL_SPI_Transmit(&hspi2, (uint8_t *)0x0A, 1, 100);
-	HAL_SPI_Transmit(&hspi2, (uint8_t *)0x27, 1, 100);
-	HAL_SPI_Transmit(&hspi2, (uint8_t *)0x3F, 1, 100);
-
-	HAL_SPI_Transmit(&hspi2, (uint8_t *)0x0A, 1, 100);
-	HAL_SPI_Transmit(&hspi2, (uint8_t *)0x2B, 1, 100);
-	HAL_SPI_Transmit(&hspi2, (uint8_t *)0x40, 1, 100);
-
-	HAL_SPI_Transmit(&hspi2, (uint8_t *)0x0A, 1, 100);
-	HAL_SPI_Transmit(&hspi2, (uint8_t *)0x2D, 1, 100);
-	HAL_SPI_Transmit(&hspi2, (uint8_t *)0x0A, 1, 100);
-*/
 
 	HAL_GPIO_WritePin(SPI2_CS_GPIO_Port, SPI2_CS_Pin,1); //Accelerometer !CS high to disable
 	hspi2.Init.NSS = SPI_NSS_SOFT;
@@ -233,55 +317,84 @@ int main(void)
 	}
 	#endif
 
-	uint8_t id_read[3] = {0x0B, 0x00, 0x00}; //write, reg 0, dummy
-
-	HAL_SPI_Receive_IT(&hspi2, answerFromSPI, 3);
-
-	HAL_SPI_Transmit_IT(&hspi2, id_read, 3);
-
-	//Test SPI
-	while(1){
+	initAcc();
 
 
-		//HAL_SPI_TransmitReceive(&hspi2, id_read, answerFromSPI, 3, 100);
-		HAL_GPIO_WritePin(SPI2_CS_GPIO_Port, SPI2_CS_Pin, 0);
-		HAL_SPI_TransmitReceive_IT(&hspi2, id_read, answerFromSPI, 3);
+
+  /* USER CODE END 2 */
+
+  /* Infinite loop */
+  /* USER CODE BEGIN WHILE */
+  while (1)
+  {
+
+	  //Test SPI / Acc
+	  	while(1){
+	  		uint8_t status_read[3] = {0x0B, 0x0B, 0x00}; //write, reg 0, dummy
+	  		HAL_GPIO_WritePin(SPI2_CS_GPIO_Port, SPI2_CS_Pin, 0);
+	  		HAL_SPI_TransmitReceive(&hspi2, status_read, answerFromSPI, 3, 10);
+	  		HAL_GPIO_WritePin(SPI2_CS_GPIO_Port, SPI2_CS_Pin, 1); //use if not using interrupts
+	  		uint8_t status = answerFromSPI[2];
+
+	  		parseAccStatus(status);
+	  		if(ADXL.ERR_USER_REGS == 1){
+	  			//while(1){
+	  				//ERROR, ACC NOT INITIALIZED
+	  			//}
+	  		}
+	  		/*if(ADXL.DATA_READY){
+	  			uint8_t x_read[3] = {0x0B, 0x0E, 0x00}; //write, reg 0, dummy
+	  			HAL_GPIO_WritePin(SPI2_CS_GPIO_Port, SPI2_CS_Pin, 0);
+	  			HAL_SPI_TransmitReceive(&hspi2, x_read, answerFromSPI, 3, 10);
+	  			HAL_GPIO_WritePin(SPI2_CS_GPIO_Port, SPI2_CS_Pin, 1); //use if not using interrupts
+	  			uint8_t x = answerFromSPI[2];
+	  			if(x > 128){
+	  				setBoardLED(1);
+	  			}else{
+	  				setBoardLED(0);
+	  			}
+	  		}*/
+
+	  		if(ADXL.ACT){
+				setBoardLED(1);
+			}
+	  		else{
+	  		//if(ADXL.INACT){
+	  			HAL_Delay(100);
+				setBoardLED(0);
+	  		}
+	  	}
+
+	  	//Test Stop Mode
+	  	while(1){
+
+	  		if(RTC_EVENT){
+	  			RTC_EVENT = 0;
+	  			setBoardLED(1);
+	  			HAL_Delay(1);
+	  			setBoardLED(0);
+
+	  			//Put in stop mode
+	  		#if USING_STOPMODE == 1
+	  			HAL_PWR_EnterSTOPMode(PWR_LOWPOWERREGULATOR_ON, PWR_STOPENTRY_WFI);
+	  		#endif
+
+	  		}else{
+	  			setBoardLED(1);
+	  			HAL_Delay(1);
+	  			setBoardLED(0);
+	  			HAL_Delay(5);
+	  		}
 
 
-		HAL_Delay(10);
-		//HAL_SPI_Transmit_IT(&hspi2, id_read, 3);
-
-		if(answerFromSPI[2] == 0xAD){
-			setBoardLED(1);
-		}else{
-			HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
-		}
-	}
+	  	}
 
 
-	//Test Stop Mode
-	while(1){
-
-		if(RTC_EVENT){
-			RTC_EVENT = 0;
-			setBoardLED(1);
-			HAL_Delay(1);
-			setBoardLED(0);
-
-			//Put in stop mode
-		#if USING_STOPMODE == 1
-			HAL_PWR_EnterSTOPMode(PWR_LOWPOWERREGULATOR_ON, PWR_STOPENTRY_WFI);
-		#endif
-
-		}else{
-			setBoardLED(1);
-			HAL_Delay(1);
-			setBoardLED(0);
-			HAL_Delay(5);
-		}
 
 
-	}
+    /* USER CODE END WHILE */
+
+    /* USER CODE BEGIN 3 */
   }
   /* USER CODE END 3 */
 }
@@ -449,6 +562,12 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(LED_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : PA0 */
+  GPIO_InitStruct.Pin = GPIO_PIN_0;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
   /*Configure GPIO pin : SPI2_CS_Pin */
   GPIO_InitStruct.Pin = SPI2_CS_Pin;
